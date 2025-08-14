@@ -1,0 +1,85 @@
+name: set up fd
+description: install the `fd` command
+inputs:
+  version:
+    description: version to install. defaults to latest.
+    required: false
+    defaults: ""
+
+runs:
+  using: composite
+  steps:
+    - name: set up fd
+      shell: bash
+      env:
+          GH_TOKEN: ${{ github.token }}
+      run: |
+        # these are changed in Windows
+        sudo="sudo"
+        install_path="/usr/local/bin/"
+        exe=
+
+        # select arch and OS
+        case "${{ runner.arch }}" in
+          "X86" | "X64")
+            runner_arch="x86_64"
+            ;;
+          "ARM64")
+            runner_arch="aarch64"
+            ;;
+          *)
+            echo "Unsupported architecture"
+            exit 1
+            ;;
+        esac
+        case "${{ runner.os }}" in
+          "Linux")
+            runner_os="unknown-linux-gnu"
+            ;;
+          "macOS")
+            runner_os="apple-darwin"
+            ;;
+          "Windows")
+            runner_os="pc-windows"
+            sudo=""
+            exe=".exe"
+
+            install_path="C:\\Program Files\\fd-find\\bin\\"
+            mkdir -p "$install_path"
+            echo "$install_path" >> $GITHUB_PATH
+            ;;
+        esac
+
+        # set up query by pasting in arch and OS
+        jq_query="$(
+          printf '.assets[] |
+            select(
+              (.state == "uploaded") and
+              (.name | test("%s-%s"))
+            ) |
+            .url' \
+            "$runner_arch" \
+            "$runner_os"
+        )"
+
+        # get download URL of most recent release
+        url="$(
+          gh release view ${{ inputs.version }} \
+            --repo sharkdp/fd \
+            --json assets \
+            --jq "$jq_query"
+        )"
+
+        if [ -z "$url" ]; then
+          echo "url not found for fd"
+          exit 1
+        fi
+
+        curl -LsO "$url"
+        tarball="$(basename "$url")"
+        # append '.exe' to regex on windows
+        regex="$(printf '/fd%s$' "$exe")"
+        file="$(tar -tzf "$tarball" | grep "$regex")"
+        tar -xzf "$tarball" "$file"
+        chmod +x "$file"
+        $sudo mv "$file" "$install_path"
